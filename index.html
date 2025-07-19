@@ -2,128 +2,99 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Land Measurement App</title>
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Land Measurement - Walk Mode</title>
   <style>
     body {
-      font-family: sans-serif;
-      margin: 0;
-      padding: 0;
-    }
-    #map {
-      height: 80vh;
-      width: 100%;
-    }
-    .controls {
-      padding: 10px;
+      font-family: Arial, sans-serif;
       text-align: center;
+      padding: 20px;
     }
     button {
-      margin: 5px;
-      padding: 10px 15px;
-      font-size: 16px;
+      margin: 10px;
+      padding: 10px 20px;
     }
-    .info {
-      padding: 10px;
-      text-align: center;
+    canvas {
+      margin-top: 20px;
+      border: 1px solid #000;
     }
   </style>
 </head>
 <body>
-  <div class="controls">
-    <button onclick="markPoint()">Mark Point</button>
-    <button onclick="finish()">Finish Measurement</button>
-  </div>
-  <div id="map"></div>
-  <div class="info" id="results"></div>
-
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+  <h2>Walk to Plot Corners</h2>
+  <p>Walk to each corner and click "Mark Point". Minimum 3 points required.</p>
+  <button onclick="markPoint()">Mark Point</button>
+  <button onclick="drawFigure()">Draw Plot</button>
+  <canvas id="plotCanvas" width="500" height="500"></canvas>
 
   <script>
-    const map = L.map("map").setView([0, 0], 18);
-    let points = [];
-    let markers = [];
+    const points = [];
+    const R = 6371000; // Earth radius in meters
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(map);
+    function toRad(x) {
+      return (x * Math.PI) / 180;
+    }
+
+    function haversineDistance(lat1, lon1, lat2, lon2) {
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                Math.sin(dLon / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
 
     function markPoint() {
       if (!navigator.geolocation) {
-        alert("Geolocation not supported");
+        alert("Geolocation is not supported by your browser");
         return;
       }
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          const point = [lng, lat]; // Turf uses [lng, lat]
-
-          points.push(point);
-
-          const marker = L.marker([lat, lng]).addTo(map);
-          marker.bindPopup(`Point ${points.length}`).openPopup();
-          markers.push(marker);
-
-          map.setView([lat, lng], 20);
-        },
-        () => alert("Could not get your location"),
-        { enableHighAccuracy: true }
-      );
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const { latitude, longitude } = pos.coords;
+        points.push({ lat: latitude, lng: longitude });
+        alert(`Point marked: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+      });
     }
 
-    function finish() {
+    function drawFigure() {
       if (points.length < 3) {
-        alert("Mark at least 3 points.");
+        alert("You need at least 3 points to draw a plot");
         return;
       }
 
-      // Close the polygon
-      points.push(points[0]);
+      const canvas = document.getElementById("plotCanvas");
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const latlngs = points.map(([lng, lat]) => [lat, lng]);
+      const minLat = Math.min(...points.map(p => p.lat));
+      const minLng = Math.min(...points.map(p => p.lng));
+      const scale = 100000; // Rough scale for converting lat/lng to canvas
 
-      // Draw polygon
-      const polygon = L.polygon(latlngs, {
-        color: "blue",
-        fillColor: "lightblue",
-        fillOpacity: 0.2,
-      }).addTo(map);
-      map.fitBounds(polygon.getBounds());
+      const scaledPoints = points.map(p => ({
+        x: (p.lng - minLng) * scale + 50,
+        y: (p.lat - minLat) * -scale + 450
+      }));
 
-      // Show distance between each point
-      for (let i = 0; i < points.length - 1; i++) {
-        const from = turf.point(points[i]);
-        const to = turf.point(points[i + 1]);
-        const line = turf.lineString([points[i], points[i + 1]]);
-        const length = turf.length(line, { units: "meters" });
+      ctx.beginPath();
+      ctx.moveTo(scaledPoints[0].x, scaledPoints[0].y);
 
-        const mid = turf.midpoint(from, to);
-        const midLatLng = [mid.geometry.coordinates[1], mid.geometry.coordinates[0]];
-
-        L.marker(midLatLng, {
-          icon: L.divIcon({
-            className: "distance-label",
-            html: `<div style="background:white;padding:2px 5px;border:1px solid #ccc;border-radius:4px;font-size:12px;">${length.toFixed(2)} m</div>`,
-          }),
-        }).addTo(map);
+      for (let i = 1; i < scaledPoints.length; i++) {
+        ctx.lineTo(scaledPoints[i].x, scaledPoints[i].y);
       }
+      ctx.closePath();
+      ctx.stroke();
 
-      // Area
-      const poly = turf.polygon([points]);
-      const area = turf.area(poly);
-      const readableArea = area > 10000
-        ? (area / 10000).toFixed(2) + " ha"
-        : area.toFixed(2) + " m²";
-
-      document.getElementById("results").innerHTML =
-        `<strong>Total Area:</strong> ${readableArea}`;
+      // Draw distances
+      ctx.fillStyle = "blue";
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const midX = (scaledPoints[i].x + scaledPoints[(i + 1) % points.length].x) / 2;
+        const midY = (scaledPoints[i].y + scaledPoints[(i + 1) % points.length].y) / 2;
+        const dist = haversineDistance(p1.lat, p1.lng, p2.lat, p2.lng);
+        ctx.fillText(`${dist.toFixed(2)} m`, midX, midY);
+      }
     }
   </script>
 </body>
