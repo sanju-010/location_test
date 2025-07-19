@@ -1,159 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Plot Measurement</title>
+  <meta charset="UTF-8">
+  <title>Land Measurement</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      margin: 20px;
-      text-align: center;
     }
 
-    #canvas {
-      border: 1px solid #333;
-      margin-top: 20px;
-    }
-
-    .loader {
+    #loader {
       display: none;
       font-weight: bold;
-      color: green;
+      color: red;
     }
 
-    .coords {
+    canvas {
+      border: 1px solid #000;
+      margin-top: 10px;
+    }
+
+    #coords {
       margin-top: 10px;
       font-size: 14px;
-      text-align: left;
-      max-height: 150px;
+      max-height: 200px;
       overflow-y: auto;
     }
 
     button {
       padding: 10px 20px;
       margin-top: 10px;
-      font-size: 16px;
-      cursor: pointer;
     }
   </style>
 </head>
 <body>
-  <h2>Land Measurement Tool</h2>
-  <button onclick="addPoint()">📍 Start Measurement</button>
-  <div class="loader" id="loader">Fetching GPS...</div>
-  <canvas id="canvas" width="400" height="400"></canvas>
-  <div class="coords" id="coordsList"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/geolib@3.3.3/dist/geolib.min.js"></script>
-  <script>
-    const points = [];
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const loader = document.getElementById("loader");
-    const coordsList = document.getElementById("coordsList");
+<h2>Land Measurement (Click & Plot)</h2>
+<div id="loader">📍 Fetching GPS location...</div>
+<canvas id="canvas" width="600" height="600"></canvas>
 
-    const origin = { lat: null, lon: null }; // First point becomes origin
+<div id="coords"></div>
+<button onclick="getLocation()">📍 Add Point</button>
 
-    function addPoint() {
-      loader.style.display = "block";
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const loader = document.getElementById('loader');
+  const coordsDiv = document.getElementById('coords');
 
-      navigator.geolocation.getCurrentPosition((position) => {
-        loader.style.display = "none";
+  const points = [];
 
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-
-        if (origin.lat === null) {
-          origin.lat = lat;
-          origin.lon = lon;
-        }
-
-        const dist = geolib.getDistance(origin, { latitude: lat, longitude: lon });
-
-        const x = geolib.getDistance(
-          { latitude: origin.lat, longitude: origin.lon },
-          { latitude: origin.lat, longitude: lon }
-        );
-
-        const y = geolib.getDistance(
-          { latitude: origin.lat, longitude: origin.lon },
-          { latitude: lat, longitude: origin.lon }
-        );
-
-        points.push({ lat, lon, x: lon > origin.lon ? x : -x, y: lat > origin.lat ? -y : y });
-
-        drawShape();
-        showCoords();
-      }, (err) => {
-        loader.textContent = "GPS error: " + err.message;
-      }, {
-        enableHighAccuracy: true,
-        timeout: 10000
-      });
+  function getLocation() {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
     }
 
-    function drawShape() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (points.length === 0) return;
+    loader.style.display = 'block';
 
-      const padding = 40;
-      const scale = 2; // 1 meter = 2 pixels
+    navigator.geolocation.getCurrentPosition(success, error, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    });
+  }
 
-      ctx.save();
-      ctx.translate(padding, canvas.height - padding);
-      ctx.scale(1, -1);
+  function success(position) {
+    loader.style.display = 'none';
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
 
-      // Draw lines
+    coordsDiv.innerHTML += `<div>📌 ${points.length + 1}. Lat: ${lat.toFixed(6)}, Lon: ${lon.toFixed(6)}</div>`;
+
+    points.push({ lat, lon });
+    draw();
+  }
+
+  function error() {
+    loader.style.display = 'none';
+    alert('Unable to retrieve your location');
+  }
+
+  function distance(p1, p2) {
+    const R = 6371000; // meters
+    const φ1 = p1.lat * Math.PI / 180;
+    const φ2 = p2.lat * Math.PI / 180;
+    const Δφ = (p2.lat - p1.lat) * Math.PI / 180;
+    const Δλ = (p2.lon - p1.lon) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (points.length < 1) return;
+
+    // Normalize points to fit canvas
+    const lats = points.map(p => p.lat);
+    const lons = points.map(p => p.lon);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+
+    const padding = 50;
+    const scaleX = (canvas.width - 2 * padding) / (maxLon - minLon || 1);
+    const scaleY = (canvas.height - 2 * padding) / (maxLat - minLat || 1);
+
+    const plotPoints = points.map(p => ({
+      x: padding + (p.lon - minLon) * scaleX,
+      y: canvas.height - padding - (p.lat - minLat) * scaleY
+    }));
+
+    // Draw lines
+    ctx.beginPath();
+    ctx.moveTo(plotPoints[0].x, plotPoints[0].y);
+    for (let i = 1; i < plotPoints.length; i++) {
+      ctx.lineTo(plotPoints[i].x, plotPoints[i].y);
+    }
+
+    // Close shape if 3+ points
+    if (plotPoints.length >= 3) {
+      ctx.lineTo(plotPoints[0].x, plotPoints[0].y);
+    }
+    ctx.strokeStyle = '#007bff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw points
+    ctx.fillStyle = 'red';
+    plotPoints.forEach((p, i) => {
       ctx.beginPath();
-      points.forEach((pt, i) => {
-        const x = pt.x * scale;
-        const y = pt.y * scale;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      if (points.length > 2) {
-        ctx.lineTo(points[0].x * scale, points[0].y * scale); // Close polygon
-      }
-      ctx.strokeStyle = "blue";
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+      ctx.fill();
 
-      // Draw points and labels
-      points.forEach((pt, i) => {
-        const x = pt.x * scale;
-        const y = pt.y * scale;
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, 2 * Math.PI);
-        ctx.fillStyle = "red";
-        ctx.fill();
-        ctx.fillText(`P${i+1}`, x + 5, y + 5);
-      });
+      // Draw index
+      ctx.fillStyle = 'black';
+      ctx.fillText(i + 1, p.x + 8, p.y - 8);
+      ctx.fillStyle = 'red';
+    });
 
-      // Draw distance labels
-      if (points.length >= 2) {
-        for (let i = 0; i < points.length; i++) {
-          const a = points[i];
-          const b = points[(i + 1) % points.length];
-          if (!b) break;
-          const midX = ((a.x + b.x) / 2) * scale;
-          const midY = ((a.y + b.y) / 2) * scale;
-          const dist = geolib.getDistance(
-            { latitude: a.lat, longitude: a.lon },
-            { latitude: b.lat, longitude: b.lon }
-          );
-          ctx.fillStyle = "black";
-          ctx.fillText(`${dist} m`, midX + 5, midY);
-        }
-      }
-
-      ctx.restore();
+    // Draw distances
+    ctx.fillStyle = 'black';
+    for (let i = 0; i < points.length - 1; i++) {
+      const midX = (plotPoints[i].x + plotPoints[i + 1].x) / 2;
+      const midY = (plotPoints[i].y + plotPoints[i + 1].y) / 2;
+      const dist = distance(points[i], points[i + 1]);
+      ctx.fillText(`${dist.toFixed(2)}m`, midX + 5, midY - 5);
     }
 
-    function showCoords() {
-      coordsList.innerHTML = points.map((p, i) => {
-        return `P${i+1}: ${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}<br>`;
-      }).join('');
+    // Close shape distance
+    if (points.length >= 3) {
+      const i = points.length - 1;
+      const midX = (plotPoints[i].x + plotPoints[0].x) / 2;
+      const midY = (plotPoints[i].y + plotPoints[0].y) / 2;
+      const dist = distance(points[i], points[0]);
+      ctx.fillText(`${dist.toFixed(2)}m`, midX + 5, midY - 5);
     }
-  </script>
+  }
+</script>
+
 </body>
 </html>
