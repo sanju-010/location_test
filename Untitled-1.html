@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Land Measurement App</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    #map {
+      height: 80vh;
+      width: 100%;
+    }
+    .controls {
+      padding: 10px;
+      text-align: center;
+    }
+    button {
+      margin: 5px;
+      padding: 10px 15px;
+      font-size: 16px;
+    }
+    .info {
+      padding: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button onclick="markPoint()">Mark Point</button>
+    <button onclick="finish()">Finish Measurement</button>
+  </div>
+  <div id="map"></div>
+  <div class="info" id="results"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <script>
+    const map = L.map("map").setView([0, 0], 18);
+    let points = [];
+    let markers = [];
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+
+    function markPoint() {
+      if (!navigator.geolocation) {
+        alert("Geolocation not supported");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const point = [lng, lat]; // Turf uses [lng, lat]
+
+          points.push(point);
+
+          const marker = L.marker([lat, lng]).addTo(map);
+          marker.bindPopup(`Point ${points.length}`).openPopup();
+          markers.push(marker);
+
+          map.setView([lat, lng], 20);
+        },
+        () => alert("Could not get your location"),
+        { enableHighAccuracy: true }
+      );
+    }
+
+    function finish() {
+      if (points.length < 3) {
+        alert("Mark at least 3 points.");
+        return;
+      }
+
+      // Close the polygon
+      points.push(points[0]);
+
+      const latlngs = points.map(([lng, lat]) => [lat, lng]);
+
+      // Draw polygon
+      const polygon = L.polygon(latlngs, {
+        color: "blue",
+        fillColor: "lightblue",
+        fillOpacity: 0.2,
+      }).addTo(map);
+      map.fitBounds(polygon.getBounds());
+
+      // Show distance between each point
+      for (let i = 0; i < points.length - 1; i++) {
+        const from = turf.point(points[i]);
+        const to = turf.point(points[i + 1]);
+        const line = turf.lineString([points[i], points[i + 1]]);
+        const length = turf.length(line, { units: "meters" });
+
+        const mid = turf.midpoint(from, to);
+        const midLatLng = [mid.geometry.coordinates[1], mid.geometry.coordinates[0]];
+
+        L.marker(midLatLng, {
+          icon: L.divIcon({
+            className: "distance-label",
+            html: `<div style="background:white;padding:2px 5px;border:1px solid #ccc;border-radius:4px;font-size:12px;">${length.toFixed(2)} m</div>`,
+          }),
+        }).addTo(map);
+      }
+
+      // Area
+      const poly = turf.polygon([points]);
+      const area = turf.area(poly);
+      const readableArea = area > 10000
+        ? (area / 10000).toFixed(2) + " ha"
+        : area.toFixed(2) + " m²";
+
+      document.getElementById("results").innerHTML =
+        `<strong>Total Area:</strong> ${readableArea}`;
+    }
+  </script>
+</body>
+</html>
