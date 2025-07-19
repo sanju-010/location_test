@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Land Measurement App</title>
+  <title>Accurate Land Measurement App</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -14,6 +14,14 @@
       padding: 10px 20px;
       font-size: 16px;
       margin-bottom: 10px;
+      cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      color: white;
+      background-color: #007bff;
+    }
+    button.reset {
+      background-color: #dc3545;
     }
     #loader {
       display: none;
@@ -21,12 +29,14 @@
       font-weight: bold;
       color: green;
     }
-    #plot {
+    #plot-container {
       margin-top: 20px;
+      text-align: center;
     }
     svg {
       border: 1px solid #ccc;
       background: #fff;
+      margin-top: 10px;
     }
     .coord-log {
       font-size: 14px;
@@ -34,23 +44,56 @@
       border: 1px solid #ccc;
       padding: 10px;
       margin-top: 20px;
-      max-height: 200px;
+      max-height: 250px;
       overflow-y: auto;
+      border-radius: 5px;
+    }
+    .results {
+      margin-top: 20px;
+      padding: 15px;
+      border: 1px solid #007bff;
+      background-color: #e7f3ff;
+      border-radius: 5px;
+    }
+    .accuracy-note {
+      font-size: 0.9em;
+      color: #666;
+      margin-top: 10px;
     }
   </style>
 </head>
 <body>
   <h1>Land Measurement Tool</h1>
   <button onclick="recordPoint()">📍 Record Point</button>
+  <button class="reset" onclick="resetMeasurement()">🔄 Reset</button>
   <div id="loader">Measuring location...</div>
-  <div id="plot"></div>
-  <div class="coord-log" id="coordLog"></div>
+
+  <div class="results" id="measurementResults" style="display: none;">
+    <h3>Measurement Results:</h3>
+    <p><strong>Perimeter:</strong> <span id="perimeterValue">0</span> meters</p>
+    <p><strong>Area:</strong> <span id="areaValue">0</span> square meters</p>
+    <div class="accuracy-note">
+      <p><strong>Note on Accuracy:</strong> Standard smartphone GPS accuracy can vary significantly (typically 3-10 meters, but sometimes more in challenging environments). For precise land surveys (meter-level or better), specialized RTK GPS devices or professional surveying equipment are required. This tool provides an estimate based on available GPS data.</p>
+    </div>
+  </div>
+
+  <div id="plot-container">
+    <h3>Visual Plot (Conceptual)</h3>
+    <div id="plot"></div>
+  </div>
+
+  <div class="coord-log" id="coordLog">
+    <h3>Recorded Points:</h3>
+  </div>
 
   <script>
-    let coords = [];
-    const plot = document.getElementById("plot");
+    let coords = []; // Stores [latitude, longitude]
+    const plotContainer = document.getElementById("plot");
     const loader = document.getElementById("loader");
     const coordLog = document.getElementById("coordLog");
+    const measurementResults = document.getElementById("measurementResults");
+    const perimeterValue = document.getElementById("perimeterValue");
+    const areaValue = document.getElementById("areaValue");
 
     function recordPoint() {
       if (!navigator.geolocation) {
@@ -59,24 +102,41 @@
       }
 
       loader.style.display = "block";
+      measurementResults.style.display = "none"; // Hide results while recording
 
       navigator.geolocation.getCurrentPosition(
         position => {
           loader.style.display = "none";
           const lat = position.coords.latitude;
           const lon = position.coords.longitude;
+          const accuracy = position.coords.accuracy; // Accuracy in meters
+
           coords.push([lat, lon]);
 
           const last = coords.length;
-          coordLog.innerHTML += `<div><strong>Point ${last}:</strong> Lat: ${lat.toFixed(6)}, Lon: ${lon.toFixed(6)}</div>`;
+          coordLog.innerHTML += `<div><strong>Point ${last}:</strong> Lat: ${lat.toFixed(7)}, Lon: ${lon.toFixed(7)} (Accuracy: ±${accuracy.toFixed(1)} m)</div>`;
+          coordLog.scrollTop = coordLog.scrollHeight; // Scroll to bottom
 
           if (coords.length >= 2) {
             drawPolygon();
+            if (coords.length >= 3) {
+              calculateMeasurements();
+              measurementResults.style.display = "block";
+            }
+          } else {
+            plotContainer.innerHTML = ''; // Clear plot if less than 2 points
+            perimeterValue.textContent = '0';
+            areaValue.textContent = '0';
           }
         },
         error => {
           loader.style.display = "none";
-          alert("Unable to retrieve your location");
+          alert("Unable to retrieve your location: " + error.message);
+        },
+        {
+          enableHighAccuracy: true, // Request the most accurate position possible
+          timeout: 10000,           // 10 seconds timeout
+          maximumAge: 0             // Don't use a cached position
         }
       );
     }
@@ -93,36 +153,144 @@
       const a = Math.sin(dLat / 2) ** 2 +
                 Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
+      return R * c; // Distance in meters
+    }
+
+    // Calculates the area of a polygon given its vertices (lat/lon)
+    // using the Shoelace formula applied to projected planar coordinates (for small areas)
+    // or more accurately, spherical excess. For simplicity and given typical GPS accuracy,
+    // a projected area calculation is usually sufficient for smartphone use.
+    // This function approximates the area for a polygon on a sphere.
+    function calculatePolygonArea(coordinates) {
+        if (coordinates.length < 3) return 0; // Need at least 3 points for an area
+
+        let area = 0;
+        const R = 6371000; // Earth radius in meters
+
+        for (let i = 0; i < coordinates.length; i++) {
+            const p1 = coordinates[i];
+            const p2 = coordinates[(i + 1) % coordinates.length];
+
+            const lat1Rad = p1[0] * Math.PI / 180;
+            const lon1Rad = p1[1] * Math.PI / 180;
+            const lat2Rad = p2[0] * Math.PI / 180;
+            const lon2Rad = p2[1] * Math.PI / 180;
+
+            // Using the Green's Theorem (Shoelace formula equivalent for spherical polygons)
+            // This is an approximation that works well for smaller polygons.
+            area += (lon2Rad - lon1Rad) * (2 + Math.sin(lat1Rad) + Math.sin(lat2Rad));
+        }
+
+        area = area * R * R / 2;
+        return Math.abs(area); // Area in square meters
+    }
+
+
+    function calculateMeasurements() {
+      let totalPerimeter = 0;
+      for (let i = 0; i < coords.length; i++) {
+        const next = (i + 1) % coords.length;
+        totalPerimeter += haversineDistance(coords[i], coords[next]);
+      }
+      perimeterValue.textContent = totalPerimeter.toFixed(2);
+
+      const area = calculatePolygonArea(coords);
+      areaValue.textContent = area.toFixed(2);
     }
 
     function drawPolygon() {
-      const distances = [];
-      for (let i = 0; i < coords.length; i++) {
-        const next = (i + 1) % coords.length;
-        distances.push(haversineDistance(coords[i], coords[next]));
+      if (coords.length < 2) {
+        plotContainer.innerHTML = '';
+        return;
       }
 
-      const maxDistance = Math.max(...distances);
-      const scale = 300 / maxDistance; // scale to fit SVG
-
-      const svgPoints = coords.map((c, i) => {
-        const x = (i === 0) ? 0 : distances.slice(0, i).reduce((a, b) => a + b, 0) * scale;
-        const y = i % 2 === 0 ? 50 : 100; // alternate y just for shape
-        return { x, y };
+      // Determine min/max lat/lon for scaling
+      let minLat = Infinity, maxLat = -Infinity;
+      let minLon = Infinity, maxLon = -Infinity;
+      coords.forEach(c => {
+        minLat = Math.min(minLat, c[0]);
+        maxLat = Math.max(maxLat, c[0]);
+        minLon = Math.min(minLon, c[1]);
+        maxLon = Math.max(maxLon, c[1]);
       });
 
-      let svgHTML = `<svg width="400" height="200">`;
-      svgPoints.forEach((pt, i) => {
-        const next = svgPoints[(i + 1) % svgPoints.length];
-        svgHTML += `<line x1="${pt.x}" y1="${pt.y}" x2="${next.x}" y2="${next.y}" stroke="blue" stroke-width="2" />`;
-        const dist = distances[i].toFixed(2);
-        const labelX = (pt.x + next.x) / 2;
-        const labelY = (pt.y + next.y) / 2 - 5;
-        svgHTML += `<text x="${labelX}" y="${labelY}" font-size="12" fill="black">${dist} m</text>`;
+      // Calculate approximate meters per degree for scaling
+      const latMetersPerDeg = haversineDistance([minLat, 0], [minLat + 1, 0]);
+      const lonMetersPerDeg = haversineDistance([0, minLon], [0, minLon + 1]);
+
+      const latSpanMeters = (maxLat - minLat) * latMetersPerDeg;
+      const lonSpanMeters = (maxLon - minLon) * lonMetersPerDeg;
+
+      const svgWidth = 400;
+      const svgHeight = 200;
+      const padding = 20;
+
+      // Determine scaling factor to fit within SVG
+      const scaleX = (svgWidth - 2 * padding) / lonSpanMeters;
+      const scaleY = (svgHeight - 2 * padding) / latSpanMeters;
+      const scale = Math.min(scaleX, scaleY);
+
+      // Translate coordinates to SVG points
+      const svgPoints = coords.map(c => {
+        const x = (c[1] - minLon) * lonMetersPerDeg * scale + padding;
+        const y = (maxLat - c[0]) * latMetersPerDeg * scale + padding; // Invert y-axis for SVG
+        return `${x},${y}`;
+      }).join(' ');
+
+      let svgHTML = `<svg width="${svgWidth}" height="${svgHeight}">`;
+
+      // Draw lines
+      for (let i = 0; i < coords.length; i++) {
+        const p1 = coords[i];
+        const p2 = coords[(i + 1) % coords.length];
+        const dist = haversineDistance(p1, p2).toFixed(2);
+
+        const svgP1 = {
+          x: (p1[1] - minLon) * lonMetersPerDeg * scale + padding,
+          y: (maxLat - p1[0]) * latMetersPerDeg * scale + padding
+        };
+        const svgP2 = {
+          x: (p2[1] - minLon) * lonMetersPerDeg * scale + padding,
+          y: (maxLat - p2[0]) * latMetersPerDeg * scale + padding
+        };
+
+        svgHTML += `<line x1="${svgP1.x}" y1="${svgP1.y}" x2="${svgP2.x}" y2="${svgP2.y}" stroke="blue" stroke-width="2" />`;
+
+        // Add distance labels if there are at least 2 points
+        if (coords.length >= 2) {
+          const labelX = (svgP1.x + svgP2.x) / 2;
+          const labelY = (svgP1.y + svgP2.y) / 2 - 5;
+          svgHTML += `<text x="${labelX}" y="${labelY}" font-size="12" fill="black" text-anchor="middle">${dist} m</text>`;
+        }
+      }
+
+      // Draw filled polygon if enough points
+      if (coords.length >= 3) {
+        svgHTML += `<polygon points="${svgPoints}" fill="lightblue" fill-opacity="0.5" stroke="blue" stroke-width="2" />`;
+      }
+
+      // Draw points
+      coords.forEach((c, i) => {
+        const svgC = {
+          x: (c[1] - minLon) * lonMetersPerDeg * scale + padding,
+          y: (maxLat - c[0]) * latMetersPerDeg * scale + padding
+        };
+        svgHTML += `<circle cx="${svgC.x}" cy="${svgC.y}" r="4" fill="red" stroke="darkred" stroke-width="1" />`;
+        svgHTML += `<text x="${svgC.x + 8}" y="${svgC.y + 4}" font-size="12" fill="purple">P${i + 1}</text>`;
       });
+
       svgHTML += `</svg>`;
-      plot.innerHTML = svgHTML;
+      plotContainer.innerHTML = svgHTML;
+    }
+
+    function resetMeasurement() {
+      coords = [];
+      coordLog.innerHTML = '<h3>Recorded Points:</h3>';
+      plotContainer.innerHTML = '';
+      measurementResults.style.display = 'none';
+      perimeterValue.textContent = '0';
+      areaValue.textContent = '0';
+      loader.style.display = 'none';
     }
   </script>
 </body>
