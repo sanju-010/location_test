@@ -1,297 +1,717 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Accurate Land Measurement App</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      background: #f9f9f9;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      margin-bottom: 10px;
-      cursor: pointer;
-      border: none;
-      border-radius: 5px;
-      color: white;
-      background-color: #007bff;
-    }
-    button.reset {
-      background-color: #dc3545;
-    }
-    #loader {
-      display: none;
-      margin: 10px 0;
-      font-weight: bold;
-      color: green;
-    }
-    #plot-container {
-      margin-top: 20px;
-      text-align: center;
-    }
-    svg {
-      border: 1px solid #ccc;
-      background: #fff;
-      margin-top: 10px;
-    }
-    .coord-log {
-      font-size: 14px;
-      background: #fff;
-      border: 1px solid #ccc;
-      padding: 10px;
-      margin-top: 20px;
-      max-height: 250px;
-      overflow-y: auto;
-      border-radius: 5px;
-    }
-    .results {
-      margin-top: 20px;
-      padding: 15px;
-      border: 1px solid #007bff;
-      background-color: #e7f3ff;
-      border-radius: 5px;
-    }
-    .accuracy-note {
-      font-size: 0.9em;
-      color: #666;
-      margin-top: 10px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Land Measurement Tool</h1>
-  <button onclick="recordPoint()">📍 Record Point</button>
-  <button class="reset" onclick="resetMeasurement()">🔄 Reset</button>
-  <div id="loader">Measuring location...</div>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>House Plan Builder — Phase 1 (Map & Measurements)</title>
 
-  <div class="results" id="measurementResults" style="display: none;">
-    <h3>Measurement Results:</h3>
-    <p><strong>Perimeter:</strong> <span id="perimeterValue">0</span> meters</p>
-    <p><strong>Area:</strong> <span id="areaValue">0</span> square meters</p>
-    <div class="accuracy-note">
-      <p><strong>Note on Accuracy:</strong> Standard smartphone GPS accuracy can vary significantly (typically 3-10 meters, but sometimes more in challenging environments). For precise land surveys (meter-level or better), specialized RTK GPS devices or professional surveying equipment are required. This tool provides an estimate based on available GPS data.</p>
-    </div>
-  </div>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
-  <div id="plot-container">
-    <h3>Visual Plot (Conceptual)</h3>
-    <div id="plot"></div>
-  </div>
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
 
-  <div class="coord-log" id="coordLog">
-    <h3>Recorded Points:</h3>
-  </div>
+        header {
+            padding: 12px;
+            background: #0b5;
+            color: white;
+        }
 
-  <script>
-    let coords = []; // Stores [latitude, longitude]
-    const plotContainer = document.getElementById("plot");
-    const loader = document.getElementById("loader");
-    const coordLog = document.getElementById("coordLog");
-    const measurementResults = document.getElementById("measurementResults");
-    const perimeterValue = document.getElementById("perimeterValue");
-    const areaValue = document.getElementById("areaValue");
+        #app {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            flex: 1;
+        }
 
-    function recordPoint() {
-      if (!navigator.geolocation) {
-        alert("Geolocation is not supported by your browser");
-        return;
-      }
+        #left {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
 
-      loader.style.display = "block";
-      measurementResults.style.display = "none"; // Hide results while recording
+        #map {
+            height: 520px;
+            border: 1px solid #ccc;
+        }
 
-      navigator.geolocation.getCurrentPosition(
-        position => {
-          loader.style.display = "none";
-          const lat = position.coords.latitude;
-          const lon = position.coords.longitude;
-          const accuracy = position.coords.accuracy; // Accuracy in meters
+        #controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
 
-          coords.push([lat, lon]);
+        button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 0;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
 
-          const last = coords.length;
-          coordLog.innerHTML += `<div><strong>Point ${last}:</strong> Lat: ${lat.toFixed(7)}, Lon: ${lon.toFixed(7)} (Accuracy: ±${accuracy.toFixed(1)} m)</div>`;
-          coordLog.scrollTop = coordLog.scrollHeight; // Scroll to bottom
+        button.primary {
+            background: #0b5;
+            color: white;
+        }
 
-          if (coords.length >= 2) {
-            drawPolygon();
-            if (coords.length >= 3) {
-              calculateMeasurements();
-              measurementResults.style.display = "block";
+        button.warn {
+            background: #f57;
+            color: white;
+        }
+
+        #right {
+            flex: 1;
+            min-width: 300px;
+            max-width: 380px;
+            background: #fafafa;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+            overflow: auto;
+        }
+
+        .info-row {
+            margin-bottom: 8px;
+        }
+
+        #diagram {
+            height: 320px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            padding: 8px;
+        }
+
+        .small {
+            font-size: 0.9rem;
+            color: #555;
+        }
+
+        ol {
+            padding-left: 16px;
+            margin: 6px 0;
+        }
+
+        .road-side {
+            color: #c00;
+            font-weight: 700;
+        }
+
+        .measure {
+            font-weight: 600;
+        }
+
+        footer {
+            padding: 10px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width:900px) {
+            #app {
+                flex-direction: column
             }
-          } else {
-            plotContainer.innerHTML = ''; // Clear plot if less than 2 points
-            perimeterValue.textContent = '0';
-            areaValue.textContent = '0';
-          }
-        },
-        error => {
-          loader.style.display = "none";
-          alert("Unable to retrieve your location: " + error.message);
-        },
-        {
-          enableHighAccuracy: true, // Request the most accurate position possible
-          timeout: 10000,           // 10 seconds timeout
-          maximumAge: 0             // Don't use a cached position
+
+            #right {
+                max-width: none
+            }
         }
-      );
-    }
+    </style>
+</head>
 
-    function haversineDistance(coord1, coord2) {
-      const R = 6371000; // Earth radius in meters
-      const toRad = deg => (deg * Math.PI) / 180;
-      const dLat = toRad(coord2[0] - coord1[0]);
-      const dLon = toRad(coord2[1] - coord1[1]);
+<body>
+    <header>
+        <strong>House Plan Builder — Phase 1</strong> — Mark plot on map, measure sides, area & draw rough diagram.
+    </header>
 
-      const lat1 = toRad(coord1[0]);
-      const lat2 = toRad(coord2[0]);
+    <div id="app">
+        <div id="left">
+            <div id="map"></div>
 
-      const a = Math.sin(dLat / 2) ** 2 +
-                Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c; // Distance in meters
-    }
+            <div id="controls">
+                <button id="startPlot" class="primary">Start / Continue Plot</button>
+                <button id="undo">Undo Last Point</button>
+                <button id="clear">Clear All</button>
+                <button id="finish" class="primary">Finish Plot</button>
 
-    // Calculates the area of a polygon given its vertices (lat/lon)
-    // using the Shoelace formula applied to projected planar coordinates (for small areas)
-    // or more accurately, spherical excess. For simplicity and given typical GPS accuracy,
-    // a projected area calculation is usually sufficient for smartphone use.
-    // This function approximates the area for a polygon on a sphere.
-    function calculatePolygonArea(coordinates) {
-        if (coordinates.length < 3) return 0; // Need at least 3 points for an area
+                <button id="toggleRoad">Toggle: Mark Road Side</button>
+                <button id="exportJSON">Prepare JSON for AI</button>
+                <button id="showHelp">Help</button>
+                <button id="generatePlan" class="primary">Generate House Plan (AI)</button>
+                <div id="aiOutput"
+                    style="white-space: pre-wrap; margin-top:12px; overflow:auto; background:#eee; padding:8px; border-radius:6px;">
+                </div>
 
-        let area = 0;
-        const R = 6371000; // Earth radius in meters
+            </div>
 
-        for (let i = 0; i < coordinates.length; i++) {
-            const p1 = coordinates[i];
-            const p2 = coordinates[(i + 1) % coordinates.length];
+            <div id="diagram" aria-label="Rough diagram (SVG)"></div>
+        </div>
 
-            const lat1Rad = p1[0] * Math.PI / 180;
-            const lon1Rad = p1[1] * Math.PI / 180;
-            const lat2Rad = p2[0] * Math.PI / 180;
-            const lon2Rad = p2[1] * Math.PI / 180;
+        <aside id="right">
+            <div class="info-row"><strong>Instructions</strong>
+                <div class="small">
+                    Click <em>Start / Continue Plot</em>, then click on map to add points (corners). Mark the road side
+                    by toggling <em>Toggle: Mark Road Side</em> and then clicking near a side. When done click
+                    <em>Finish Plot</em>.
+                </div>
+            </div>
 
-            // Using the Green's Theorem (Shoelace formula equivalent for spherical polygons)
-            // This is an approximation that works well for smaller polygons.
-            area += (lon2Rad - lon1Rad) * (2 + Math.sin(lat1Rad) + Math.sin(lat2Rad));
+            <div class="info-row">
+                <strong>Points (lat, lng)</strong>
+                <ol id="pointsList"></ol>
+            </div>
+
+            <div class="info-row">
+                <strong>Side lengths</strong>
+                <ol id="sidesList"></ol>
+            </div>
+
+            <div class="info-row">
+                <strong>Perimeter:</strong> <span id="perimeter">0</span> m<br />
+                <strong>Area:</strong> <span id="area">0</span> m² (<span id="areaAcres">0</span> acres, <span
+                    id="areaCents">0</span> cents)
+            </div>
+
+            <div class="info-row">
+                <strong>Marked road side:</strong> <span id="roadSide">None</span>
+            </div>
+
+            <hr />
+            <div class="info-row">
+                <strong>Building Requirements (sample)</strong>
+                <div class="small">
+                    Floors: <input id="floors" type="number" value="1" min="1" style="width:60px" /> &nbsp;
+                    Bedrooms: <input id="bedrooms" type="number" value="2" min="0" style="width:60px" /><br />
+                    Attached bathrooms: <input id="attachedBath" type="number" value="1" min="0" style="width:60px" />
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <footer>Free tools: Leaflet (OpenStreetMap) + turf.js. No backend required for this demo.</footer>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Turf (all-in-one) -->
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+    <script>
+        /* === Phase 1: Map + Plot marking + measurements + rough diagram === */
+
+        const map = L.map('map').setView([11.0, 76.9], 13); // default view (change if you want)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let plotting = true;
+        let points = []; // array of [lng, lat] for turf (GeoJSON order)
+        let markers = [];
+        let poly = null;  // leaflet polygon/line
+        let roadSideIndex = null; // index of segment (0..n-1) marked as road
+        let markingRoad = false;
+
+        const pointsList = document.getElementById('pointsList');
+        const sidesList = document.getElementById('sidesList');
+        const perimeterEl = document.getElementById('perimeter');
+        const areaEl = document.getElementById('area');
+        const areaAcresEl = document.getElementById('areaAcres');
+        const areaCentsEl = document.getElementById('areaCents');
+        const roadSideEl = document.getElementById('roadSide');
+        const diagramEl = document.getElementById('diagram');
+
+        function toLatLng(pt) { return [pt[1], pt[0]]; } // [lng,lat] -> Leaflet latlng
+
+        function redrawMap() {
+            // clear
+            if (poly) { map.removeLayer(poly); poly = null; }
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+
+            if (points.length === 0) return;
+
+            // draw polygon if finished (>=3) else polyline
+            if (points.length >= 3) {
+                // create polygon with GeoJSON order but Leaflet wants [lat,lng]
+                const latlngs = points.map(toLatLng);
+                poly = L.polygon(latlngs, { color: '#3388ff', weight: 2 }).addTo(map);
+                // add segment popups for clicking when marking road
+                poly.on('click', (ev) => {
+                    if (markingRoad) {
+                        const clicked = [ev.latlng.lng, ev.latlng.lat];
+                        const segIndex = nearestSegmentIndex(clicked);
+                        if (segIndex === null) {
+                            alert('Click closer to a plot side to mark road.');
+                            return;
+                        }
+                        markRoadSide(segIndex);
+                    }
+                });
+
+
+            } else {
+                // draw polyline
+                const latlngs = points.map(toLatLng);
+                poly = L.polyline(latlngs, { color: '#3388ff', weight: 2 }).addTo(map);
+            }
+
+            // markers
+            points.forEach((pt, i) => {
+                const m = L.circleMarker(toLatLng(pt), { radius: 5, color: '#114', fillColor: '#fff', weight: 2 }).addTo(map);
+                m.bindTooltip(`P${i + 1}`, { permanent: true, direction: 'right' });
+                markers.push(m);
+            });
         }
 
-        area = area * R * R / 2;
-        return Math.abs(area); // Area in square meters
-    }
+        function updateListsAndMeasures() {
+            // points list
+            pointsList.innerHTML = '';
+            points.forEach((p, i) => {
+                const li = document.createElement('li');
+                li.textContent = `${p[1].toFixed(6)}, ${p[0].toFixed(6)} (P${i + 1})`;
+                pointsList.appendChild(li);
+            });
+
+            // sides
+            sidesList.innerHTML = '';
+            if (points.length >= 2) {
+                let perim = 0;
+                for (let i = 0; i < points.length; i++) {
+                    const a = points[i];
+                    const b = points[(i + 1) % points.length];
+                    if (i === points.length - 1 && points.length < 3) break; // do not close if only 2 pts
+                    const from = turf.point(a), to = turf.point(b);
+                    const d = turf.distance(from, to, { units: 'meters' });
+                    perim += d;
+                    const li = document.createElement('li');
+                    li.innerHTML = `Side ${i + 1}: <span class="measure">${d.toFixed(2)} m</span>` + (roadSideIndex === i ? ' <span class="road-side">(Road)</span>' : '');
+                    sidesList.appendChild(li);
+                }
+                perimeterEl.textContent = perim.toFixed(2);
+
+                // area only valid when polygon closed (>=3)
+                if (points.length >= 3) {
+                    const polyGeo = turf.polygon([[...points, points[0]]]);
+                    const area = turf.area(polyGeo); // in m^2
+                    areaEl.textContent = area.toFixed(2);
+                    const acres = area / 4046.85642;
+                    const cents = area / 40.4685642; // 1 cent = 40.4685642 m2 (Indian cent)
+                    areaAcresEl.textContent = acres.toFixed(4);
+                    areaCentsEl.textContent = cents.toFixed(2);
+                } else {
+                    areaEl.textContent = '0';
+                    areaAcresEl.textContent = '0';
+                    areaCentsEl.textContent = '0';
+                }
+            } else {
+                perimeterEl.textContent = '0';
+                areaEl.textContent = '0';
+            }
+            roadSideEl.textContent = roadSideIndex === null ? 'None' : ('Side ' + (roadSideIndex + 1));
+            drawDiagram();
+        }
+
+        function nearestSegmentIndex(clicked) {
+            if (points.length < 2) return null;
+            let best = { idx: null, dist: Infinity };
+            const maxDistanceThreshold = 20; // meters, adjust as needed
+
+            for (let i = 0; i < points.length; i++) {
+                if (i === points.length - 1 && points.length < 3) continue;
+                const a = points[i], b = points[(i + 1) % points.length];
+                const seg = turf.lineString([a, b]);
+                const pt = turf.point(clicked);
+                const snap = turf.nearestPointOnLine(seg, pt, { units: 'meters' });
+                const d = snap.properties.dist;
+                if (d < best.dist) {
+                    best = { idx: i, dist: d };
+                }
+            }
+
+            // If click is too far from any segment, return null
+            if (best.dist > maxDistanceThreshold) return null;
+
+            return best.idx;
+        }
 
 
-    function calculateMeasurements() {
-      let totalPerimeter = 0;
-      for (let i = 0; i < coords.length; i++) {
-        const next = (i + 1) % coords.length;
-        totalPerimeter += haversineDistance(coords[i], coords[next]);
-      }
-      perimeterValue.textContent = totalPerimeter.toFixed(2);
+        function markRoadSide(idx) {
+            if (idx === null) return;
+            roadSideIndex = idx;
+            alert('Marked side ' + (idx + 1) + ' as Road side.');
+            updateListsAndMeasures();
+        }
 
-      const area = calculatePolygonArea(coords);
-      areaValue.textContent = area.toFixed(2);
-    }
+        /* Map click handler */
+        map.on('click', function (e) {
+            if (!plotting) return;
 
-    function drawPolygon() {
-      if (coords.length < 2) {
-        plotContainer.innerHTML = '';
+            if (markingRoad) {
+                // Ignore adding points while marking road.
+                return;
+            }
+
+            const lat = e.latlng.lat, lng = e.latlng.lng;
+            points.push([lng, lat]);
+            redrawMap();
+            updateListsAndMeasures();
+        });
+
+
+        /* Buttons */
+        document.getElementById('startPlot').addEventListener('click', () => { plotting = true; alert('Plotting enabled: click on map to add points.'); });
+        document.getElementById('undo').addEventListener('click', () => {
+            if (points.length > 0) points.pop();
+            roadSideIndex = null; // remove road when undo to avoid mismatch (simple)
+            redrawMap(); updateListsAndMeasures();
+        });
+        document.getElementById('clear').addEventListener('click', () => {
+            if (!confirm('Clear all points?')) return;
+            points = []; roadSideIndex = null; redrawMap(); updateListsAndMeasures();
+        });
+        document.getElementById('finish').addEventListener('click', () => {
+            plotting = false; alert('Plot finished. You can toggle "Mark Road Side" and click near a side to mark road.');
+        });
+
+        document.getElementById('toggleRoad').addEventListener('click', () => {
+            markingRoad = !markingRoad;
+            plotting = !markingRoad;  // disable plotting when marking road
+
+            const btn = document.getElementById('toggleRoad');
+            btn.style.background = markingRoad ? '#c33' : '';
+            btn.style.color = markingRoad ? 'white' : '';
+
+            alert('Road marking ' + (markingRoad ? 'ON — click near a side on the map' : 'OFF'));
+        });
+
+
+        /* Diagram drawing */
+        function drawDiagram() {
+            // We'll draw an SVG scaled polygon into diagramEl
+            diagramEl.innerHTML = '';
+            const w = diagramEl.clientWidth - 16;
+            const h = diagramEl.clientHeight - 16;
+            if (points.length < 2) {
+                diagramEl.innerHTML = '<div class="small">Add at least 2 points to draw a rough diagram.</div>';
+                return;
+            }
+            // convert to 2D plane using simple projection: use coordinates relative to centroid in meters using turf
+            const coords = points.map(p => [p[0], p[1]]); // [lng,lat]
+            // compute centroid (turf)
+            const centroid = turf.centroid(turf.polygon([[...coords, coords[0]]], {})).geometry.coordinates;
+            // convert each point to meters offset relative to centroid using turf.distance and bearing
+            const ptsXY = coords.map(c => {
+                const bearing = turf.bearing(turf.point(centroid), turf.point(c)); // deg
+                const dist = turf.distance(turf.point(centroid), turf.point(c), { units: 'meters' }); // m
+                // convert polar to x/y (x east, y north)
+                const rad = bearing * Math.PI / 180;
+                const x = dist * Math.sin(rad);
+                const y = dist * Math.cos(rad);
+                return [x, y];
+            });
+            // find bounding box
+            const xs = ptsXY.map(p => p[0]), ys = ptsXY.map(p => p[1]);
+            let minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+            const pad = 20;
+            const spanX = maxX - minX || 1;
+            const spanY = maxY - minY || 1;
+            const scale = Math.min((w - pad * 2) / spanX, (h - pad * 2) / spanY) * 0.95;
+            // create SVG
+            const svgns = 'http://www.w3.org/2000/svg';
+            const svg = document.createElementNS(svgns, 'svg');
+            svg.setAttribute('width', w); svg.setAttribute('height', h);
+            svg.style.background = 'white';
+            // draw polygon
+            const polyPath = document.createElementNS(svgns, 'polygon');
+            const pointsAttr = ptsXY.map(p => {
+                const sx = pad + (p[0] - minX) * scale;
+                const sy = (h - pad) - (p[1] - minY) * scale; // invert y so north is up
+                return `${sx},${sy}`;
+            }).join(' ');
+            polyPath.setAttribute('points', pointsAttr);
+            polyPath.setAttribute('fill', '#f0f8ff');
+            polyPath.setAttribute('stroke', '#116');
+            polyPath.setAttribute('stroke-width', '2');
+            svg.appendChild(polyPath);
+
+            // label sides with lengths
+            for (let i = 0; i < ptsXY.length; i++) {
+                const a = ptsXY[i], b = ptsXY[(i + 1) % ptsXY.length];
+                const ax = pad + (a[0] - minX) * scale;
+                const ay = (h - pad) - (a[1] - minY) * scale;
+                const bx = pad + (b[0] - minX) * scale;
+                const by = (h - pad) - (b[1] - minY) * scale;
+                const mx = (ax + bx) / 2, my = (ay + by) / 2;
+                // compute real length using turf distance from coords
+                const d = turf.distance(turf.point(coords[i]), turf.point(coords[(i + 1) % coords.length]), { units: 'meters' });
+                const text = `${d.toFixed(2)} m`;
+                const t = document.createElementNS(svgns, 'text');
+                t.setAttribute('x', mx); t.setAttribute('y', my);
+                t.setAttribute('font-size', '12'); t.setAttribute('text-anchor', 'middle');
+                t.setAttribute('fill', (roadSideIndex === i ? '#c00' : '#333'));
+                t.textContent = text;
+                svg.appendChild(t);
+
+                // if this is road side, draw a red overlay
+                if (roadSideIndex === i) {
+                    const seg = document.createElementNS(svgns, 'line');
+                    seg.setAttribute('x1', ax); seg.setAttribute('y1', ay); seg.setAttribute('x2', bx); seg.setAttribute('y2', by);
+                    seg.setAttribute('stroke', '#c00'); seg.setAttribute('stroke-width', '4'); seg.setAttribute('stroke-linecap', 'round'); seg.setAttribute('opacity', '0.6');
+                    svg.appendChild(seg);
+                }
+            }
+
+            // draw North arrow at top-left
+            const arrowGroup = document.createElementNS(svgns, 'g');
+            const arrowX = 20, arrowY = 20;
+            const n = document.createElementNS(svgns, 'text');
+            n.setAttribute('x', arrowX); n.setAttribute('y', arrowY + 5); n.setAttribute('font-size', '16'); n.textContent = 'N';
+            const line = document.createElementNS(svgns, 'line');
+            line.setAttribute('x1', arrowX); line.setAttribute('y1', arrowY + 12); line.setAttribute('x2', arrowX); line.setAttribute('y2', arrowY + 36);
+            line.setAttribute('stroke', '#000'); line.setAttribute('stroke-width', '2');
+            svg.appendChild(line); svg.appendChild(n);
+
+            // append svg
+            diagramEl.appendChild(svg);
+        }
+
+        /* Prepare JSON for AI (OpenAI) */
+        function prepareJSONForAI() {
+            const floors = parseInt(document.getElementById('floors').value || 1, 10);
+            const bedrooms = parseInt(document.getElementById('bedrooms').value || 0, 10);
+            const attachedBath = parseInt(document.getElementById('attachedBath').value || 0, 10);
+
+            // Build coordinates as [{lat,lng}] order for easier reading
+            const coords = points.map(p => ({ lng: p[0], lat: p[1] }));
+            const area = parseFloat(areaEl.textContent || 0);
+            const perimeter = parseFloat(perimeterEl.textContent || 0);
+
+            const data = {
+                plot: {
+                    coordinates: coords,
+                    area_m2: area,
+                    perimeter_m: perimeter,
+                    road_side_index: roadSideIndex
+                },
+                requirements: {
+                    floors, bedrooms, attachedBath
+                },
+                metadata: {
+                    project_by: 'StudentName', // change when you submit real info
+                    timestamp: new Date().toISOString()
+                }
+            };
+            return data;
+        }
+
+        document.getElementById('exportJSON').addEventListener('click', () => {
+            const payload = prepareJSONForAI();
+            // show JSON in new window for copy
+            const w = window.open('', '_blank');
+            w.document.write('<pre style="white-space:pre-wrap;word-wrap:break-word;">' + JSON.stringify(payload, null, 2) + '</pre>');
+        });
+
+        /* --- Example: How you'd send this to OpenAI (DO NOT put your API key in a public frontend) ---
+        You will need a server/proxy to keep your OpenAI API key secret. For quick local testing, you can run a tiny local server that forwards requests.
+        Below is a *commented* example if you were to call from a protected environment.
+        
+        const payload = prepareJSONForAI();
+        fetch('https://api.openai.com/v1/chat/completions', {
+          method:'POST',
+          headers:{
+            'Content-Type':'application/json',
+            'Authorization':'Bearer YOUR_OPENAI_KEY_HERE' // DO NOT use in public client
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini', // example
+            messages:[
+              {role:'system', content: 'You are an assistant that outputs a simple floor plan as SVG or JSON layout following Vastu rules.'},
+              {role:'user', content: 'Generate a basic floor plan using this plot and requirements: ' + JSON.stringify(payload)}
+            ],
+            temperature:0.2
+          })
+        }).then(r=>r.json()).then(res=>{
+          console.log(res);
+          // Parse assistant output (expect JSON or SVG string) and render on page
+        });
+        --- end example --- */
+
+        updateListsAndMeasures();
+
+
+
+        // Paste your API key here safely (in practice keep it secret on backend!)
+        // const OPENAI_API_KEY = 'sk-proj-';
+
+        // async function generateHousePlan() {
+        //     const btn = document.getElementById('generatePlan');
+        //     const output = document.getElementById('aiOutput');
+
+        //     // Disable button & show loading text
+        //     btn.disabled = true;
+        //     btn.textContent = 'Generating... Please wait';
+        //     output.textContent = '';
+
+        //     try {
+        //         const payload = prepareJSONForAI();
+
+        //         const messages = [
+        //             { role: 'system', content: 'You are an assistant that outputs a simple floor plan as SVG or JSON layout following Vastu rules.' },
+        //             { role: 'user', content: 'Generate a basic floor plan using this plot and requirements: ' + JSON.stringify(payload) }
+        //         ];
+
+        //         const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        //             method: 'POST',
+        //             headers: {
+        //                 'Content-Type': 'application/json',
+        //                 'Authorization': `Bearer ${OPENAI_API_KEY}`
+        //             },
+        //             body: JSON.stringify({
+        //                 model: 'gpt-4o-mini',
+        //                 messages: messages,
+        //                 temperature: 0.2,
+        //                 max_tokens: 1500,
+        //             })
+        //         });
+
+        //         if (!response.ok) {
+        //             const error = await response.json();
+        //             throw new Error(error.error?.message || 'API request failed');
+        //         }
+
+        //         const data = await response.json();
+
+        //         const aiReply = data.choices?.[0]?.message?.content || 'No response';
+        //         output.textContent = aiReply;
+
+        //     } catch (err) {
+        //         alert('Error calling OpenAI API: ' + err.message);
+        //     } finally {
+        //         // Re-enable button and reset text
+        //         btn.disabled = false;
+        //         btn.textContent = 'Generate House Plan (AI)';
+        //     }
+        // }
+
+        // document.getElementById('generatePlan').addEventListener('click', () => {
+        //     generateHousePlan();
+        // });
+
+
+        // Paste your API key here. Since this is a demo, you can use your real key.
+        const OPENAI_API_KEY = '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';
+
+        // Paste your API key here. Since this is a demo, you can use your real key.
+
+        // Paste your API key here.
+
+// Paste your Base64-encoded image data here.
+const REFERENCE_IMAGE_DATA = 'data:image/jpeg;base64,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';
+
+async function generateHousePlan() {
+    const btn = document.getElementById('generatePlan');
+    const aiOutput = document.getElementById('aiOutput');
+    const diagramEl = document.getElementById('diagram');
+
+    btn.disabled = true;
+    btn.textContent = 'Generating... Please wait';
+    aiOutput.textContent = '';
+    diagramEl.innerHTML = '';
+
+    if (!OPENAI_API_KEY || OPENAI_API_KEY === 'YOUR_ACTUAL_OPENAI_API_KEY_HERE') {
+        alert('Please paste your real OpenAI API key into the code.');
+        btn.disabled = false;
+        btn.textContent = 'Generate House Plan (AI)';
+        aiOutput.textContent = 'Error: API key not set.';
         return;
-      }
+    }
 
-      // Determine min/max lat/lon for scaling
-      let minLat = Infinity, maxLat = -Infinity;
-      let minLon = Infinity, maxLon = -Infinity;
-      coords.forEach(c => {
-        minLat = Math.min(minLat, c[0]);
-        maxLat = Math.max(maxLat, c[0]);
-        minLon = Math.min(minLon, c[1]);
-        maxLon = Math.max(maxLon, c[1]);
-      });
+    if (!REFERENCE_IMAGE_DATA || REFERENCE_IMAGE_DATA === 'YOUR_BASE64_ENCODED_IMAGE_DATA_HERE') {
+        alert('Please paste your Base64-encoded image data into the code.');
+        btn.disabled = false;
+        btn.textContent = 'Generate House Plan (AI)';
+        aiOutput.textContent = 'Error: Reference image data not set.';
+        return;
+    }
 
-      // Calculate approximate meters per degree for scaling
-      const latMetersPerDeg = haversineDistance([minLat, 0], [minLat + 1, 0]);
-      const lonMetersPerDeg = haversineDistance([0, minLon], [0, minLon + 1]);
+    try {
+        const payload = prepareJSONForAI();
 
-      const latSpanMeters = (maxLat - minLat) * latMetersPerDeg;
-      const lonSpanMeters = (maxLon - minLon) * lonMetersPerDeg;
+        const messages = [
+            {
+                role: 'system',
+                content: `You are an architectural assistant. Your task is to create a detailed house plan as a single, valid SVG string. Do not include any extra text or markdown. Use the provided image as a direct reference for the style, layout, symbols (doors, windows, fixtures), and level of detail.`
+            },
+            {
+                role: 'user',
+                content: [
+                    {
+                        type: 'text',
+                        text: 'Generate a floor plan using this plot and requirements, following the style of the provided image: ' + JSON.stringify(payload)
+                    },
+                    {
+                        type: 'image_url',
+                        image_url: {
+                            url: REFERENCE_IMAGE_DATA
+                        }
+                    }
+                ]
+            }
+        ];
 
-      const svgWidth = 400;
-      const svgHeight = 200;
-      const padding = 20;
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o', // Use the gpt-4o model for image input
+                messages: messages,
+                temperature: 0.3,
+                max_tokens: 2000,
+            })
+        });
 
-      // Determine scaling factor to fit within SVG
-      const scaleX = (svgWidth - 2 * padding) / lonSpanMeters;
-      const scaleY = (svgHeight - 2 * padding) / latSpanMeters;
-      const scale = Math.min(scaleX, scaleY);
-
-      // Translate coordinates to SVG points
-      const svgPoints = coords.map(c => {
-        const x = (c[1] - minLon) * lonMetersPerDeg * scale + padding;
-        const y = (maxLat - c[0]) * latMetersPerDeg * scale + padding; // Invert y-axis for SVG
-        return `${x},${y}`;
-      }).join(' ');
-
-      let svgHTML = `<svg width="${svgWidth}" height="${svgHeight}">`;
-
-      // Draw lines
-      for (let i = 0; i < coords.length; i++) {
-        const p1 = coords[i];
-        const p2 = coords[(i + 1) % coords.length];
-        const dist = haversineDistance(p1, p2).toFixed(2);
-
-        const svgP1 = {
-          x: (p1[1] - minLon) * lonMetersPerDeg * scale + padding,
-          y: (maxLat - p1[0]) * latMetersPerDeg * scale + padding
-        };
-        const svgP2 = {
-          x: (p2[1] - minLon) * lonMetersPerDeg * scale + padding,
-          y: (maxLat - p2[0]) * latMetersPerDeg * scale + padding
-        };
-
-        svgHTML += `<line x1="${svgP1.x}" y1="${svgP1.y}" x2="${svgP2.x}" y2="${svgP2.y}" stroke="blue" stroke-width="2" />`;
-
-        // Add distance labels if there are at least 2 points
-        if (coords.length >= 2) {
-          const labelX = (svgP1.x + svgP2.x) / 2;
-          const labelY = (svgP1.y + svgP2.y) / 2 - 5;
-          svgHTML += `<text x="${labelX}" y="${labelY}" font-size="12" fill="black" text-anchor="middle">${dist} m</text>`;
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error?.message || 'API request failed');
         }
-      }
 
-      // Draw filled polygon if enough points
-      if (coords.length >= 3) {
-        svgHTML += `<polygon points="${svgPoints}" fill="lightblue" fill-opacity="0.5" stroke="blue" stroke-width="2" />`;
-      }
+        const data = await response.json();
+        const aiReply = data.choices?.[0]?.message?.content || '';
 
-      // Draw points
-      coords.forEach((c, i) => {
-        const svgC = {
-          x: (c[1] - minLon) * lonMetersPerDeg * scale + padding,
-          y: (maxLat - c[0]) * latMetersPerDeg * scale + padding
-        };
-        svgHTML += `<circle cx="${svgC.x}" cy="${svgC.y}" r="4" fill="red" stroke="darkred" stroke-width="1" />`;
-        svgHTML += `<text x="${svgC.x + 8}" y="${svgC.y + 4}" font-size="12" fill="purple">P${i + 1}</text>`;
-      });
+        if (aiReply.trim().startsWith('<svg')) {
+            diagramEl.innerHTML = aiReply;
+            aiOutput.textContent = 'House plan generated successfully!';
+        } else {
+            diagramEl.innerHTML = '<div style="color:red;">Error: AI did not return a valid SVG. Check the raw output below.</div>';
+            aiOutput.textContent = aiReply;
+        }
 
-      svgHTML += `</svg>`;
-      plotContainer.innerHTML = svgHTML;
+    } catch (err) {
+        alert('Error calling OpenAI API: ' + err.message);
+        aiOutput.textContent = 'Error: ' + err.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate House Plan (AI)';
     }
+}
 
-    function resetMeasurement() {
-      coords = [];
-      coordLog.innerHTML = '<h3>Recorded Points:</h3>';
-      plotContainer.innerHTML = '';
-      measurementResults.style.display = 'none';
-      perimeterValue.textContent = '0';
-      areaValue.textContent = '0';
-      loader.style.display = 'none';
-    }
-  </script>
+        document.getElementById('generatePlan').addEventListener('click', () => {
+            generateHousePlan();
+        });
+
+    </script>
 </body>
+
 </html>
